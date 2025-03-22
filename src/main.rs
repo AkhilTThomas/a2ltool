@@ -14,6 +14,7 @@ mod debuginfo;
 mod ifdata;
 mod insert;
 mod remove;
+mod rename;
 mod symbol;
 mod update;
 mod version;
@@ -308,6 +309,20 @@ fn core(args: impl Iterator<Item = OsString>) -> Result<(), String> {
             cond_print!(verbose, now, msg);
         }
         cond_print!(verbose, now, format!("Removed {} items", removed_count));
+    }
+    // rename items based on REGEX
+    if arg_matches.contains_id("RENAME_PREFIX") {
+        let prefixes: Vec<&str> = match arg_matches.get_many::<String>("RENAME_PREFIX") {
+            Some(values) => values.map(|x| &**x).collect(),
+            None => Vec::new(),
+        };
+
+        let mut log_msgs: Vec<String> = Vec::new();
+        let renamed_count = rename::rename_items(&mut a2l_file, &prefixes, &mut log_msgs);
+        for msg in log_msgs {
+            cond_print!(verbose, now, msg);
+        }
+        cond_print!(verbose, now, format!("Renamed {} items", renamed_count));
     }
 
     if let Some(debugdata) = &debuginfo {
@@ -869,6 +884,14 @@ The arg --update must be present.")
         .long("remove")
         .number_of_values(1)
         .value_name("REGEX")
+        .action(clap::ArgAction::Append)
+    )
+    .arg(Arg::new("RENAME_PREFIX")
+        .help("Rename any CHARACTERISTICs, MEASUREMENTs and INSTANCEs by removing the prefix from name.")
+        .short('N')
+        .long("rename")
+        .number_of_values(1)
+        .value_name("RENAME")
         .action(clap::ArgAction::Append)
     )
     .group(
@@ -1631,5 +1654,68 @@ mod test {
         // Passing the option --show-xcp should neither panic nor return an error
         // The option only prints some information, so it is not possisble to check the output
         core(args.into_iter()).unwrap();
+    }
+
+    #[test]
+    fn test_option_rename() {
+        // rename items by removing a specified prefix
+        let a2l_input = a2lfile::load(
+            "fixtures/a2l/update_test1.a2l",
+            None,
+            &mut Vec::new(),
+            false,
+        )
+        .unwrap();
+        // Remove the prefix 'Measurement' from the A2L display name
+        let prefix_name = "Measurement_";
+
+        let tempdir = tempfile::tempdir().unwrap().into_path();
+        let outfile = tempdir.join("output.a2l");
+        assert!(!outfile.exists());
+        let args = vec![
+            OsString::from("a2ltool"),
+            OsString::from("fixtures/a2l/update_test1.a2l"),
+            OsString::from("--rename"),
+            OsString::from(prefix_name),
+            OsString::from("--output"),
+            OsString::from(outfile.clone()),
+        ];
+        core(args.into_iter()).unwrap();
+        let a2l_output = a2lfile::load(outfile, None, &mut Vec::new(), false).unwrap();
+
+        let expected_renamed: Vec<(String, String)> = a2l_input.project.module[0]
+            .measurement
+            .iter()
+            .filter(|entry| entry.name.starts_with(prefix_name))
+            .map(|entry| {
+                (
+                    entry.name.clone(),
+                    entry.name.strip_prefix(prefix_name).unwrap().to_string(),
+                )
+            })
+            .collect();
+
+        let actual_names: Vec<String> = a2l_output.project.module[0]
+            .measurement
+            .iter()
+            .map(|entry| entry.name.clone())
+            .collect();
+        // Ensure all expected renamed names exist in output
+        for (_, expected) in &expected_renamed {
+            assert!(
+                actual_names.contains(expected),
+                "Missing expected renamed measurement: {}",
+                expected
+            );
+        }
+
+        // Ensure no output name still has the prefix
+        for actual in &actual_names {
+            assert!(
+                !actual.starts_with(prefix_name),
+                "Output still contains prefix: {}",
+                actual
+            );
+        }
     }
 }

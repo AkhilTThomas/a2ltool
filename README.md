@@ -66,6 +66,8 @@ Assume that the file `a2ltool.rsp` exists and contains valid arguments for `a2lt
 
 `a2ltool @a2ltool.rsp`
 
+### Remove varible name based on prefix
+`a2ltool input.a2l input.elf --rename-prefix "Rte_" --output newfile.a2l
 ## About a2l Files
 
 A2l files describe measurement variables and tunable parameters of an embedded device (typically: an automotive ECU).
